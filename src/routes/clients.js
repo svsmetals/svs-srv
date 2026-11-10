@@ -191,3 +191,77 @@ clientRoutes.delete(
     res.status(204).end();
   })
 );
+
+// POST /clients/import  — bulk create from a sheet preview.
+// Accepts { rows: [{ name, type, phones, gstin, email, address, city, state,
+//   country, territory, owner_id }] }.  Re-checks each row for dups server-side
+// (by norm name / GSTIN / phone overlap) so concurrent uploads don't collide.
+// Returns { added: [...], dups: [...], bad: [...] }.
+// Needs client.transfer OR master/manager role (same gate as the legacy mayImport).
+clientRoutes.post(
+  '/import',
+  wrap(async (req, res) => {
+    const { user } = req;
+    const allowed = user.role === 'master' || user.role === 'manager'
+      || (user.perms && user.perms['client.transfer'] === true);
+    if (!allowed) return res.status(403).json({ error: 'Only a master or manager can import clients in bulk.' });
+
+    const inRows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+    const added = [], dups = [], bad = [];
+
+    for (const o of inRows) {
+      if (!o.name) { bad.push({ name: '(no name)', why: 'missing name' }); continue; }
+      if (!o.phones?.length) { bad.push({ name: o.name, why: 'missing phone' }); continue; }
+
+      const nm = String(o.name).toLowerCase().replace(/[^a-z0-9]+/g, '');
+      const g  = String(o.gstin || '').toUpperCase().replace(/\s/g, '');
+      const ph = (o.phones || []).map((p) => String(p).replace(/\D/g, '').slice(-10)).filter((p) => p.length === 10);
+
+      let dupSql = `select id, name from clients where norm = $1`;
+      const dpParams = [nm];
+      if (g.length >= 15) { dpParams.push(g); dupSql += ` or (gstin != '' and gstin = $${dpParams.length})`; }
+      const { rows: existing } = await query(dupSql, dpParams);
+
+      let phoneDup = null;
+      if (ph.length) {
+        for (const p of ph) {
+          const { rows: pr } = await query(
+            `select id, name from clients where phones @> $1::jsonb limit 1`,
+            [JSON.stringify([p])]
+          );
+          if (pr.length) { phoneDup = pr[0]; break; }
+        }
+      }
+
+      if (existing.length) {
+        dups.push({ name: o.name, why: 'already on the register as ' + existing[0].name }); continue;
+      }
+      if (phoneDup) {
+        dups.push({ name: o.name, why: 'phone already on the register under ' + phoneDup.name }); continue;
+      }
+
+      const ownerId = o.owner_id || user.id;
+      const id = idWith('CLI');
+      const history = [{ at: new Date().toISOString(), to_user_id: ownerId, reason: 'Bulk import', by_name: user.name }];
+
+      await query(
+        `insert into clients
+           (id, name, norm, norm_full, gstin, email, type, address, city, state, country, territory, owner_id, owner_since, phones, contacts, history)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, current_date, $14::jsonb, '[]'::jsonb, $15::jsonb)`,
+        [id, o.name, nm, nm,
+         (o.gstin || '').toUpperCase(), o.email || '', o.type || '',
+         o.address || '', o.city || '', o.state || '', o.country || '', o.territory || '',
+         ownerId, JSON.stringify(o.phones), JSON.stringify(history)]
+      );
+
+      const ownerName = (await query('select name from users where id = $1', [ownerId])).rows[0]?.name || ownerId;
+      added.push({
+        id, name: o.name, type: o.type || '',
+        where: (o.country || o.city || '') + (o.territory ? ' · ' + o.territory : ''),
+        owner: ownerName,
+      });
+    }
+
+    res.json({ added, dups, bad });
+  })
+);
