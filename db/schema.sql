@@ -99,10 +99,10 @@ create table user_permissions (
 );
 
 -- ---------------------------------------------------------------------------
--- Clients. phones and ownership history ride as JSONB (edited only as part of
--- the client; no independent CRUD). norm/norm_full are search-normalized names.
---   phones:  ["9876543210", ...]
---   history: [{ at, to_user_id, reason, by_name }, ...]
+-- Clients. phones, contacts and ownership history ride as JSONB.
+--   phones:   ["9876543210", ...]
+--   contacts: [{ name, role, phone, email, primary }, ...]  — named people
+--   history:  [{ at, to_user_id, reason, by_name }, ...]
 -- ---------------------------------------------------------------------------
 create table clients (
   id          text primary key,
@@ -120,6 +120,7 @@ create table clients (
   owner_id    text references users(id),
   owner_since date,
   phones      jsonb not null default '[]'::jsonb,
+  contacts    jsonb not null default '[]'::jsonb,
   history     jsonb not null default '[]'::jsonb,
   created_at  timestamptz not null default now()
 );

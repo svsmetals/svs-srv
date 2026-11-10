@@ -20,7 +20,8 @@ function userId(username) {
 // screen draws, plus the per-user overrides, departments and owned-account
 // count. No pin_hash ever leaves the server.
 const DIRECTORY_SELECT = `
-  select u.id, u.username, u.name, u.code, u.role, u.loc_id, u.phone, u.email,
+  select u.id, u.username, u.name, u.code, u.role, u.loc_id, l.name as loc_name,
+         u.phone, u.email,
          u.dob, u.scope, u.lead_name, u.lead_phone, u.lead_email, u.backup_id,
          u.leave, u.add_tabs, u.no_tabs, u.active, u.created_at,
          coalesce((select array_agg(d.dept order by d.dept)
@@ -28,7 +29,8 @@ const DIRECTORY_SELECT = `
          coalesce((select jsonb_object_agg(p.perm, p.granted)
                    from user_permissions p where p.user_id = u.id), '{}'::jsonb) as overrides,
          (select count(*) from clients c where c.owner_id = u.id)::int as accounts
-  from users u`;
+  from users u
+  left join locations l on l.id = u.loc_id`;
 
 async function loadDirectory(id) {
   const { rows } = await query(`${DIRECTORY_SELECT} where u.id = $1`, [id]);

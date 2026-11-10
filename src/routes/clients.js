@@ -22,13 +22,44 @@ function scopeFilter(user, params, col = '') {
   return { sql: ` and ${col}owner_id = $${params.length}`, params };
 }
 
+// Score bands — ported verbatim from index.html (clientScore / SCORE_BANDS).
+const SCORE_BANDS = {
+  annual: [[0, 1], [500000, 2], [2000000, 3], [7500000, 4], [20000000, 5]],
+  freq:   [[0, 1], [2, 2], [5, 3], [10, 4], [20, 5]],
+  single: [[0, 1], [100000, 2], [400000, 3], [1200000, 4], [3000000, 5]],
+};
+function band(v, rows) { let s = 1; rows.forEach(([min, pts]) => { if (v >= min) s = pts; }); return s; }
+
 async function loadClient(id) {
   const { rows } = await query('select * from clients where id = $1', [id]);
   const client = rows[0];
   if (!client) return null;
-  // phones and history are JSONB columns — pg returns them already parsed.
-  client.phones = client.phones || [];
-  client.history = client.history || [];
+  client.phones   = client.phones   || [];
+  client.contacts = client.contacts || [];
+  client.history  = client.history  || [];
+
+  // Compute the legacy client score from the last 12 months of orders.
+  // Legacy clientScore() counts ALL orders (including Cancelled) and uses a
+  // date-based >= on the cutoff day — match that exactly.
+  const { rows: sc } = await query(
+    `select coalesce(sum(value),0)::numeric as annual_value,
+            count(*)::int                  as freq_count,
+            coalesce(max(value),0)::numeric as biggest
+     from orders
+     where client_id = $1
+       and created_at::date >= current_date - 365`,
+    [id]
+  );
+  const { annual_value, freq_count, biggest } = sc[0];
+  const av = Number(annual_value), fc = Number(freq_count), bi = Number(biggest);
+  const parts = {
+    annual: band(av, SCORE_BANDS.annual),
+    freq:   band(fc, SCORE_BANDS.freq),
+    single: band(bi, SCORE_BANDS.single),
+  };
+  const overall = Math.round(((parts.annual + parts.freq + parts.single) / 3) * 10) / 10;
+  client.score = { parts, overall, annual_value: av, freq_count: fc, biggest: bi };
+
   return client;
 }
 
@@ -90,11 +121,11 @@ clientRoutes.post(
 
     await query(
       `insert into clients
-        (id, name, norm, norm_full, gstin, email, type, address, city, state, country, territory, owner_id, owner_since, phones, history)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, current_date, $14::jsonb, $15::jsonb)`,
+        (id, name, norm, norm_full, gstin, email, type, address, city, state, country, territory, owner_id, owner_since, phones, contacts, history)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, current_date, $14::jsonb, $15::jsonb, $16::jsonb)`,
       [id, b.name, norm, norm, (b.gstin || '').toUpperCase(), b.email || '', b.type || '',
        b.address || '', b.city || '', b.state || '', b.country || '', b.territory || '', ownerId,
-       JSON.stringify(phones), JSON.stringify(history)]
+       JSON.stringify(phones), JSON.stringify([]), JSON.stringify(history)]
     );
 
     res.status(201).json(await loadClient(id));
@@ -117,6 +148,10 @@ clientRoutes.patch(
     if ('phones' in (req.body || {})) {
       params.push(JSON.stringify(req.body.phones || []));
       sets.push(`phones = $${params.length}::jsonb`);
+    }
+    if ('contacts' in (req.body || {})) {
+      params.push(JSON.stringify(req.body.contacts || []));
+      sets.push(`contacts = $${params.length}::jsonb`);
     }
     if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
     params.push(req.params.id);
