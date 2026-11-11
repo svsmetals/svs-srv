@@ -38,6 +38,38 @@ async function main() {
     [id, MASTER_USERNAME.toLowerCase(), MASTER_NAME, hashPin(MASTER_PIN)]
   );
 
+  // Company settings — letterhead, strip, addresses.
+  await pool.query(
+    `insert into settings (id, data) values (1, $1::jsonb)
+     on conflict (id) do update set data = excluded.data`,
+    [JSON.stringify({
+      company: {
+        name: 'S. V. Metals & Extrusions Pvt. Ltd.',
+        strip: 'Cable Trays | Cable Lugs | Glands | Earthing | Solar | Steel Fabrication | Storage Racks',
+        regoff: 'Reg.Off./Unit 1 : A-2/1, Dist, UPSIDA Industrial Area, Kosi, Kotwan, Uttar Pradesh 281403',
+        unit2: 'Unit 2 : Gr. Noida',
+        certL: '', certImgL: '', certR: '', certImgR: '',
+        billName: 'S. V. Metals & Extrusions Pvt. Ltd.',
+        billAddr: 'A-2/1, UPSIDA, Kosi Kotwan, UP 281403',
+        gstin: '09AAMCS6918C2Z2',
+        bankAcc: '9748779148',
+        bankIfsc: 'KKBK0005304',
+      },
+      quote: {
+        terms: {
+          'Freight': 'Extra as per actual',
+          'HSN Code': 'Cable Trays & Steel Fabrication (73089090); GI Earthing Strips (72122020); Lugs (85369090); Glands (85389000)',
+          'Accessories': 'Two pieces of Coupler Plates shall be provided FREE OF COST with each piece of MS / GI cable tray.',
+          'Jurisdiction': 'Subject to Noida Jurisdiction',
+          'Delivery Time': 'Negotiable',
+          'Order Initiation': 'In case of advance payment term, manufacturing will start only after receipt of advance payment and manufacturer will not be responsible for the change in rates or delay in delivery.',
+          'Holding of Material': 'For whatsoever reason, if the Buyer fails to pick up material within 1 week of Material Readiness intimation, Buyer will be liable to pay 1% per week from the date of Readiness Intimation. For Buyers availing Credit Facility, the Credit period shall start from the date of Readiness Intimation.',
+        },
+      },
+      teamLead: { name: '', phone: '' },
+    })]
+  );
+
   console.log('Seeded locations L1/L2 and master user.');
   console.log(`  login: username="${MASTER_USERNAME.toLowerCase()}"  pin="${MASTER_PIN}"`);
   await pool.end();

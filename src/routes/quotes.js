@@ -45,7 +45,26 @@ function prepare(body) {
 }
 
 async function loadQuote(id) {
-  const { rows } = await query('select * from quotes where id = $1', [id]);
+  const { rows } = await query(
+    `select q.*,
+        cl.name    as client_name,
+        cl.address as client_address,
+        cl.gstin   as client_gstin,
+        u.name     as user_name,
+        u.phone    as user_phone,
+        u.email    as user_email,
+        u.lead_name,
+        u.lead_phone,
+        l.name     as loc_name,
+        l.line     as loc_line,
+        l.addr     as loc_addr
+      from quotes q
+      left join clients cl on cl.id = q.client_id
+      left join users  u  on u.id  = q.user_id
+      left join locations l on l.id = q.loc_id
+      where q.id = $1`,
+    [id]
+  );
   const quote = rows[0];
   if (!quote) return null;
   // items/charges/notes/events are JSONB columns — already parsed by pg.
@@ -213,5 +232,47 @@ quoteRoutes.post(
     );
     if (!rowCount) return res.status(404).json({ error: 'not found' });
     res.json(await loadQuote(req.params.id));
+  })
+);
+
+// POST /quotes/:id/revise  — create a new Draft revision that inherits items/notes/charges.
+// Sets prev quote to Superseded. New quote keeps the same offer number + increments rev.
+quoteRoutes.post(
+  '/:id/revise',
+  requirePerm('quote.create'),
+  wrap(async (req, res) => {
+    const prev = await loadQuote(req.params.id);
+    if (!prev) return res.status(404).json({ error: 'not found' });
+
+    const newRev = (prev.rev || 0) + 1;
+    const label  = prev.no ? `${prev.no}/${prev.fy} R${newRev}` : null;
+    const id = idWith('Q');
+
+    const events = JSON.stringify([{
+      at: new Date().toISOString(),
+      by_name: req.user.name,
+      text: `Revision ${newRev} created from ${prev.label || 'Draft'}`,
+    }]);
+
+    await withTransaction(async (c) => {
+      await c.query(
+        `insert into quotes
+          (id, no, rev, fy, label, client_id, user_id, loc_id, quote_date, validity, gst, status, follow_up, revise_of,
+           items, charges, notes, events, items_count, total, extra, taxable, gst_amt, grand)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'Draft',$12,$13,
+           $14::jsonb,$15::jsonb,$16::jsonb,$17::jsonb,$18,$19,$20,$21,$22,$23)`,
+        [id, prev.no, newRev, prev.fy, label,
+         prev.client_id, prev.user_id, prev.loc_id,
+         prev.quote_date, prev.validity, prev.gst, prev.follow_up, prev.id,
+         JSON.stringify(prev.items), JSON.stringify(prev.charges), JSON.stringify(prev.notes), events,
+         prev.items_count, prev.total, prev.extra, prev.taxable, prev.gst_amt, prev.grand]
+      );
+      await c.query(
+        `update quotes set status = 'Superseded', events = events || $1::jsonb where id = $2`,
+        [JSON.stringify([{ at: new Date().toISOString(), by_name: req.user.name, text: `Superseded — revision ${newRev} raised` }]), prev.id]
+      );
+    });
+
+    res.status(201).json(await loadQuote(id));
   })
 );

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authenticate } from '../auth.js';
+import { query } from '../db.js';
 import { wrap } from '../lib/util.js';
 import {
   PERMS, ROLE_LABEL, ROLE_DEFAULTS, DEPTS, TAB_LABELS, DEPT_RIGHTS, DEPT_TABS,
@@ -24,5 +25,14 @@ metaRoutes.get(
       deptRightsDefault: DEPT_RIGHTS,
       deptTabsDefault: DEPT_TABS,
     });
+  })
+);
+
+// GET /meta/settings  — company + letterhead settings singleton
+metaRoutes.get(
+  '/settings',
+  wrap(async (req, res) => {
+    const { rows } = await query('select data from settings where id = 1');
+    res.json(rows[0]?.data || {});
   })
 );
