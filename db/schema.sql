@@ -21,6 +21,7 @@
 -- a non-destructive ALTER migration will be written before that point.
 -- ============================================================================
 
+drop table if exists meetings cascade;
 drop table if exists order_events cascade;
 drop table if exists order_amendments cascade;
 drop table if exists order_deliveries cascade;
@@ -238,6 +239,31 @@ create table order_events (
   by_name  text,
   text     text
 );
+
+-- ---------------------------------------------------------------------------
+-- Meetings. One row per scheduled client meeting.
+--   status: 'Scheduled' → 'Done' | 'Cancelled' (closed via PATCH /meetings/:id)
+-- ---------------------------------------------------------------------------
+create table meetings (
+  id          text primary key,
+  client_id   text not null references clients(id),
+  client_name text,
+  quote_id    text references quotes(id),
+  date        date not null,
+  time        text,
+  kind        text,
+  note        text,
+  user_id     text references users(id),
+  by_name     text,
+  status      text not null default 'Scheduled'
+              check (status in ('Scheduled','Done','Cancelled')),
+  outcome     text,
+  ts          timestamptz not null default now(),
+  closed_ts   timestamptz
+);
+create index meetings_client_idx on meetings(client_id);
+create index meetings_user_idx   on meetings(user_id);
+create index meetings_status_idx on meetings(status);
 
 -- ---------------------------------------------------------------------------
 -- Company settings — a singleton config blob (letterhead, terms, bank, notes).
