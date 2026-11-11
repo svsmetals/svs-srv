@@ -52,10 +52,14 @@ async function main() {
         billName: 'S. V. Metals & Extrusions Pvt. Ltd.',
         billAddr: 'A-2/1, UPSIDA, Kosi Kotwan, UP 281403',
         gstin: '09AAMCS6918C2Z2',
+        email: '',
         bankAcc: '9748779148',
         bankIfsc: 'KKBK0005304',
       },
       quote: {
+        gst: 18,
+        validity: '3 Days',
+        defaultNotes: [],
         terms: {
           'Freight': 'Extra as per actual',
           'HSN Code': 'Cable Trays & Steel Fabrication (73089090); GI Earthing Strips (72122020); Lugs (85369090); Glands (85389000)',
@@ -66,6 +70,7 @@ async function main() {
           'Holding of Material': 'For whatsoever reason, if the Buyer fails to pick up material within 1 week of Material Readiness intimation, Buyer will be liable to pay 1% per week from the date of Readiness Intimation. For Buyers availing Credit Facility, the Credit period shall start from the date of Readiness Intimation.',
         },
       },
+      headings: [],
       teamLead: { name: '', phone: '' },
     })]
   );

@@ -50,6 +50,8 @@ async function loadQuote(id) {
         cl.name    as client_name,
         cl.address as client_address,
         cl.gstin   as client_gstin,
+        cl.email   as client_email,
+        cl.phones  as client_phones,
         u.name     as user_name,
         u.phone    as user_phone,
         u.email    as user_email,
@@ -85,12 +87,17 @@ quoteRoutes.get(
   wrap(async (req, res) => {
     const params = [];
     let sql = `select q.id, q.no, q.rev, q.fy, q.label, q.client_id, q.user_id, q.loc_id,
-        q.quote_date, q.status, q.gst, q.created_at,
+        q.quote_date, q.status, q.gst, q.created_at, q.follow_up,
         q.items_count, q.total as basic_total, q.extra as charges_total, q.grand as grand_total,
-        cl.name as client_name, u.name as user_name
+        cl.name as client_name, u.name as user_name, l.name as loc_name,
+        greatest(q.created_at,
+          (select max((e->>'at')::timestamptz)
+           from jsonb_array_elements(coalesce(q.events,'[]'::jsonb)) e)
+        ) as last_activity_at
       from quotes q
       left join clients cl on cl.id = q.client_id
       left join users u on u.id = q.user_id
+      left join locations l on l.id = q.loc_id
       where 1=1`;
     if (req.query.status) {
       params.push(req.query.status);
@@ -274,5 +281,41 @@ quoteRoutes.post(
     });
 
     res.status(201).json(await loadQuote(id));
+  })
+);
+
+// POST /quotes/:id/call  — log a call/update. Appends to events, optionally
+// changes status. Matches legacy saveCall() at index.html:5706.
+quoteRoutes.post(
+  '/:id/call',
+  requirePerm('quote.create'),
+  wrap(async (req, res) => {
+    const { mode, note, status: newStatus, task, due } = req.body || {};
+    if (!note?.trim()) return res.status(400).json({ error: 'note is required' });
+
+    const quote = await loadQuote(req.params.id);
+    if (!quote) return res.status(404).json({ error: 'not found' });
+
+    const closing = newStatus === 'Won' || newStatus === 'Lost';
+    const statusChanged = newStatus && newStatus !== quote.status;
+    let eventText = `${mode} — ${note.trim()}`;
+    if (statusChanged) eventText += ` (status ${quote.status} → ${newStatus})`;
+    if (task && due && !closing) eventText += ` · next: ${task} by ${due}`;
+
+    const event = { at: new Date().toISOString(), by_name: req.user.name, text: eventText };
+
+    if (statusChanged) {
+      await query(
+        `update quotes set status = $1, events = events || $2::jsonb where id = $3`,
+        [newStatus, JSON.stringify([event]), quote.id]
+      );
+    } else {
+      await query(
+        `update quotes set events = events || $1::jsonb where id = $2`,
+        [JSON.stringify([event]), quote.id]
+      );
+    }
+
+    res.json(await loadQuote(req.params.id));
   })
 );

@@ -25,6 +25,7 @@ drop table if exists order_events cascade;
 drop table if exists order_amendments cascade;
 drop table if exists order_deliveries cascade;
 drop table if exists orders cascade;
+drop table if exists meetings cascade;
 drop table if exists quote_events cascade;
 drop table if exists quote_notes cascade;
 drop table if exists quote_charges cascade;
@@ -237,6 +238,23 @@ create table order_events (
   at       timestamptz not null default now(),
   by_name  text,
   text     text
+);
+
+-- ---------------------------------------------------------------------------
+-- Meetings — scheduled client meetings, optionally linked to a quote.
+-- ---------------------------------------------------------------------------
+create table meetings (
+  id          text primary key,
+  client_id   text references clients(id),
+  quote_id    text references quotes(id),
+  user_id     text references users(id),
+  date        date not null,
+  time        text,
+  kind        text,
+  note        text,
+  status      text not null default 'Scheduled',
+  outcome     text,
+  created_at  timestamptz not null default now()
 );
 
 -- ---------------------------------------------------------------------------
