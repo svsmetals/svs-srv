@@ -249,16 +249,16 @@ create table meetings (
   client_id   text not null references clients(id),
   client_name text,
   quote_id    text references quotes(id),
+  user_id     text references users(id),
   date        date not null,
   time        text,
   kind        text,
   note        text,
-  user_id     text references users(id),
   by_name     text,
   status      text not null default 'Scheduled'
               check (status in ('Scheduled','Done','Cancelled')),
   outcome     text,
-  ts          timestamptz not null default now(),
+  created_at  timestamptz not null default now(),
   closed_ts   timestamptz
 );
 create index meetings_client_idx on meetings(client_id);
