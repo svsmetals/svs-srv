@@ -10,6 +10,7 @@ import { locationRoutes } from './routes/locations.js';
 import { departmentRoutes } from './routes/departments.js';
 import { metaRoutes } from './routes/meta.js';
 import { meetingRoutes } from './routes/meetings.js';
+import { rateRoutes } from './routes/rates.js';
 
 export function createApp() {
   const app = express();
@@ -32,6 +33,7 @@ export function createApp() {
   app.use('/departments', departmentRoutes);
   app.use('/meta', metaRoutes);
   app.use('/meetings', meetingRoutes);
+  app.use('/rates', rateRoutes);
 
   // 404
   app.use((req, res) => res.status(404).json({ error: 'not found' }));

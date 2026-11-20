@@ -138,3 +138,22 @@ export function scopeOf(user) {
   if (user.overrides && user.overrides.scope) return user.overrides.scope;
   return (ROLE_DEFAULTS[user.role] || {}).scope || 'own';
 }
+
+// ---------------------------------------------------------------------------
+// Cost master access (legacy canRate / canSeeRates).
+//   canRate     — may edit rates, add materials, lock the sheet (master only).
+//   canSeeRates — may read the sheet: master, or anyone who makes offers / sees
+//                 reports, or sits in a department that prices work.
+// ---------------------------------------------------------------------------
+const RATE_DEPTS = ['Sales', 'Marketing', 'Tendering', 'Accounts', 'Finance', 'Admin'];
+
+export function canRate(user) {
+  return !!user && user.role === 'master';
+}
+
+export function canSeeRates(user) {
+  if (!user) return false;
+  if (user.role === 'master') return true;
+  if (can(user, 'quote.create') || can(user, 'reports.view')) return true;
+  return (user.depts || []).some((d) => RATE_DEPTS.includes(d));
+}

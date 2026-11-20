@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { query } from '../db.js';
 import { signToken, verifyPin } from '../auth.js';
 import { authenticate } from '../auth.js';
-import { can, PERMS } from '../permissions.js';
+import { can, canSeeRates, canRate, PERMS } from '../permissions.js';
 import { wrap } from '../lib/util.js';
 
 export const authRoutes = Router();
@@ -39,6 +39,10 @@ authRoutes.get(
     const u = req.user;
     const perms = {};
     for (const [key] of PERMS) perms[key] = can(u, key);
+    // Derived cost-master gates (not real PERMS flags; the sheet is reached via
+    // role/dept rather than a single permission). The nav + edit UI key off these.
+    perms['rates.view'] = canSeeRates(u);
+    perms['rates.edit'] = canRate(u);
     res.json({ user: { id: u.id, username: u.username, name: u.name, role: u.role, loc_id: u.loc_id }, perms });
   })
 );

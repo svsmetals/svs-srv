@@ -77,6 +77,30 @@ async function main() {
 
   console.log('Seeded locations L1/L2 and master user.');
   console.log(`  login: username="${MASTER_USERNAME.toLowerCase()}"  pin="${MASTER_PIN}"`);
+
+  // Cost master opening figures the legacy app seeds unconditionally: the cast
+  // iron (Hodi) covers, priced per piece, and the three finishes the estimate
+  // merge adds to the sheet (galvalume walkway + the two electro processes).
+  const RT = (n) => `RT-seed-${n}`;
+  const RATE_SEED = [
+    ['Cast iron (Hodi) cover', '300x300', 'Nos', 320],
+    ['Cast iron (Hodi) cover', '450x450', 'Nos', 950],
+    ['Cast iron (Hodi) cover', '600x600', 'Nos', 2200],
+    ['Non-ferrous & stainless sheet', 'Galvalume', 'kg', 85],
+    ['Job work', 'Electro polishing', 'kg', 20],
+    ['Job work', 'Electro-galvanising', 'kg', 12],
+  ];
+  for (let i = 0; i < RATE_SEED.length; i++) {
+    const [material, spec, unit, market] = RATE_SEED[i];
+    await pool.query(
+      `insert into rates (id, material, spec, col, unit, cost, market, on_date, by_name, history)
+       values ($1,$2,$3,'',$4,0,$5,current_date,'opening figure','[]'::jsonb)
+       on conflict (material, spec, col) do nothing`,
+      [RT(i), material, spec, unit, market]
+    );
+  }
+  console.log(`Seeded ${RATE_SEED.length} cost-master opening rates.`);
+
   await pool.end();
 }
 

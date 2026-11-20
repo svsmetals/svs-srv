@@ -38,6 +38,7 @@ drop table if exists clients cascade;
 drop table if exists user_permissions cascade;
 drop table if exists user_departments cascade;
 drop table if exists users cascade;
+drop table if exists rates cascade;
 drop table if exists settings cascade;
 drop table if exists locations cascade;
 
@@ -271,4 +272,31 @@ create index meetings_status_idx on meetings(status);
 create table settings (
   id   int primary key default 1 check (id = 1),
   data jsonb not null default '{}'::jsonb
+);
+
+-- ---------------------------------------------------------------------------
+-- Cost master rates (legacy rawRates). The master prices the metal the works
+-- buys; the sales desk reads it. A rate is filed under a material, a spec band
+-- and a column (col is '' for a single-rate line). The sheet's structured bands
+-- live in app code (frontend lib/rateSheet.js); a row here holds the figure for
+-- one cell, or a free-form "other material" added by hand.
+--   cost    what the floor stock was bought at
+--   market  what it costs today — the figure a new offer is priced from
+--   history [{ on, by, cost, market }, ...]  (last 24, prior values)
+-- The submit/lock state rides in settings.data.rateLock.
+-- ---------------------------------------------------------------------------
+create table rates (
+  id        text primary key,
+  material  text not null,
+  form      text,
+  spec      text not null default '',
+  col       text not null default '',
+  unit      text not null default 'kg',
+  cost      numeric not null default 0,
+  market    numeric not null default 0,
+  note      text,
+  on_date   date,
+  by_name   text,
+  history   jsonb not null default '[]'::jsonb,
+  unique (material, spec, col)
 );

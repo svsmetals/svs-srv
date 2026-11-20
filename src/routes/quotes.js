@@ -89,7 +89,7 @@ quoteRoutes.get(
     let sql = `select q.id, q.no, q.rev, q.fy, q.label, q.client_id, q.user_id, q.loc_id,
         q.quote_date, q.status, q.gst, q.created_at, q.follow_up,
         q.items_count, q.total as basic_total, q.extra as charges_total, q.grand as grand_total,
-        cl.name as client_name, u.name as user_name, l.name as loc_name,
+        cl.name as client_name, cl.phones as client_phones, u.name as user_name, l.name as loc_name,
         greatest(q.created_at,
           (select max((e->>'at')::timestamptz)
            from jsonb_array_elements(coalesce(q.events,'[]'::jsonb)) e)

@@ -94,6 +94,143 @@ clientRoutes.get(
   })
 );
 
+// ---------------------------------------------------------------------------
+// Duplicate / similarity helpers — ported from legacy findLikely() block.
+// ---------------------------------------------------------------------------
+
+// Strips noise suffixes and normalises to alphanumeric only — legacy dqNorm().
+function dqNorm(n) {
+  return String(n || '').toLowerCase()
+    .replace(/[.,]/g, '')
+    .replace(/\b(pvt|private)\b/g, 'p')
+    .replace(/\b(ltd|limited)\b/g, 'l')
+    .replace(/\b(co|company|corp|corporation|inds|industries|enterprises|ent)\b/g, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+const NAME_NOISE = new Set([
+  'pvt','private','ltd','limited','co','company','corp','corporation',
+  'inds','industries','industry','enterprises','enterprise','ent','and','the','of','llp','inc',
+  'international','india','indian','group','works','sons','bros','brothers','trading','traders',
+  'engineers','engineering','electricals','electrical','electric','systems','system','solutions',
+]);
+
+// Extract stemmed meaningful words — same stem logic as legacy nameKey().
+function meaningfulWords(n) {
+  return String(n || '').toLowerCase()
+    .replace(/&/g, ' and ').replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/).filter(Boolean)
+    .map((w) => w.replace(/(ies)$/, 'y').replace(/(es|s)$/, ''))
+    .filter((w) => w.length > 2 && !NAME_NOISE.has(w));
+}
+
+// Sorted meaningful-word key — legacy nameKey().
+const nameKey = (n) => meaningfulWords(n).sort().join(' ');
+
+// ---------------------------------------------------------------------------
+
+// GET /clients/similar  — must come before GET /:id so Express doesn't consume
+// "similar" as an id parameter.
+clientRoutes.get(
+  '/similar',
+  wrap(async (req, res) => {
+    const { name = '', phone = '', gstin = '', email = '' } = req.query;
+    const hits = [];
+    const seen = new Set();
+
+    function push(row, why, how) {
+      if (!row || seen.has(row.id)) return;
+      seen.add(row.id);
+      hits.push({
+        id: row.id, name: row.name, city: row.city || '', gstin: row.gstin || '',
+        owner_id: row.owner_id, owner_name: row.owner_name || row.owner_id || '—',
+        quotes_count: Number(row.quotes_count) || 0, why, how,
+      });
+    }
+
+    const base = `
+      select c.id, c.name, c.city, c.gstin, c.owner_id,
+             u.name as owner_name,
+             (select count(*)::int from quotes q where q.client_id = c.id) as quotes_count
+      from clients c
+      left join users u on u.id = c.owner_id`;
+
+    // 1. GSTIN — certain
+    const g = String(gstin).toUpperCase().replace(/\s/g, '');
+    if (g.length >= 15) {
+      const { rows } = await query(`${base} where upper(replace(c.gstin,' ','')) = $1`, [g]);
+      rows.forEach((r) => push(r, 'the same GST number', 'certain'));
+    }
+
+    // 2. Phone (last 10 digits) — likely
+    const ph = String(phone).replace(/\D/g, '').slice(-10);
+    if (ph.length === 10) {
+      const { rows: pr } = await query(
+        `${base} where exists (
+           select 1 from jsonb_array_elements_text(c.phones) p
+           where right(regexp_replace(p,'[^0-9]','','g'),10) = $1
+         )`, [ph]
+      );
+      pr.forEach((r) => push(r, 'the same mobile number', 'likely'));
+      // Also check contact-level phones
+      const { rows: cr } = await query(
+        `${base} where exists (
+           select 1 from jsonb_array_elements(c.contacts) ct
+           where right(regexp_replace(ct->>'phone','[^0-9]','','g'),10) = $1
+         )`, [ph]
+      );
+      cr.forEach((r) => push(r, 'the same mobile number', 'likely'));
+    }
+
+    // 3. Corporate email domain — likely (skip free providers)
+    const FREE = new Set(['gmail.com','yahoo.com','hotmail.com','outlook.com',
+      'rediffmail.com','live.com','icloud.com','yahoo.co.in','ymail.com']);
+    const dom = String(email).toLowerCase().split('@')[1] || '';
+    if (dom && !FREE.has(dom)) {
+      const { rows } = await query(
+        `${base} where lower(split_part(c.email,'@',2)) = $1`, [dom]
+      );
+      rows.forEach((r) => push(r, `the same email domain (${dom})`, 'likely'));
+    }
+
+    // 4. Name matching — load candidates sharing a meaningful word, compare in JS
+    if (name.trim()) {
+      const qDqn = dqNorm(name);
+      const qKey = nameKey(name);
+      const words = meaningfulWords(name).filter((w) => w.length > 2);
+
+      if (words.length > 0) {
+        const cond = words.map((_, i) => `lower(c.name) like $${i + 1}`).join(' or ');
+        const { rows: cands } = await query(
+          `${base} where ${cond}`,
+          words.map((w) => `%${w}%`)
+        );
+        for (const c of cands) {
+          const cDqn = dqNorm(c.name);
+          const cKey = nameKey(c.name);
+          if (qDqn.length > 0 && qDqn === cDqn) {
+            push(c, 'effectively the same name', 'likely');
+          } else if (qDqn.length > 6 && (cDqn.startsWith(qDqn) || qDqn.startsWith(cDqn))) {
+            push(c, 'a very similar name', 'possible');
+          } else if (qKey && qKey === cKey) {
+            push(c, 'the same words in the name', 'likely');
+          } else if (qKey && cKey) {
+            const qa = qKey.split(' '), ca = cKey.split(' ');
+            const shared = qa.filter((w) => ca.includes(w)).length;
+            if (shared && shared === Math.min(qa.length, ca.length) && Math.max(qa.length, ca.length) <= shared + 1) {
+              push(c, 'nearly the same name', 'possible');
+            }
+          }
+        }
+      }
+    }
+
+    const rank = { certain: 0, likely: 1, possible: 2 };
+    hits.sort((a, b) => rank[a.how] - rank[b.how]);
+    res.json(hits.slice(0, 8));
+  })
+);
+
 // GET /clients/:id
 clientRoutes.get(
   '/:id',
